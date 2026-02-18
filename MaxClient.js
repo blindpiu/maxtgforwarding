@@ -41,6 +41,29 @@ class MaxClient {
         return packet.seq;
     }
 
+    _sendInteractiveFalse() {
+        return new Promise((resolve, reject) => {
+            const seq = this.seq++;
+
+            const packet = {
+                ver: 11,
+                cmd: 0,
+                seq: seq,
+                opcode: 1,
+                payload: { interactive: false }
+            };
+
+            this.pending.set(seq, { resolve, reject });
+
+            try {
+                this.ws.send(JSON.stringify(packet));
+            } catch (e) {
+                this.pending.delete(seq);
+                reject(e);
+            }
+        });
+    }
+
     _startHeartbeat() {
         if (this.pingInterval) clearInterval(this.pingInterval);
 
@@ -151,9 +174,15 @@ class MaxClient {
 
     async _onMessage(data) {
         let msg;
+
         try {
+            if (typeof (data) !== "string") {
+                data = data.toString();
+            }
+
             msg = JSON.parse(data);
-        } catch {
+        } catch (e) {
+            console.error("Parse error:", e);
             return;
         }
 
@@ -167,6 +196,13 @@ class MaxClient {
 
         // AUTH CONFIRM
         if (msg.opcode === 19) {
+            if (msg.payload?.error) {
+                console.error("❌ Auth error:", msg.payload);
+
+                this.authenticated = false;
+                return;
+            }
+
             this.authenticated = true;
             console.log("🎉 Authenticated");
 
@@ -180,6 +216,7 @@ class MaxClient {
         // HEARTBEAT
         if (msg.opcode === 1) {
             console.log("Server heartbeat:", msg);
+            await this._sendInteractiveFalse();
             return;
         }
 
