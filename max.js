@@ -8,7 +8,9 @@ const MAX_TOKEN = process.env.MAX_TOKEN;
 const MAX_CHAT_IDS = (process.env.MAX_CHAT_IDS || "").split(",").map(x => parseInt(x));
 const TG_BOT_TOKEN = process.env.TG_BOT_TOKEN;
 const TG_CHAT_ID = process.env.TG_CHAT_ID;
+const TG_CHAT_ID_OFP = process.env.TG_CHAT_ID_OFP;
 const CHAT_NAMES = process.env.CHAT_NAMES ? JSON.parse(process.env.CHAT_NAMES) : {};
+const OFP_CHAT_ID = parseInt(process.env.OFP_CHAT_ID, 10);
 
 const client = new MaxClient(MAX_TOKEN);
 
@@ -59,8 +61,9 @@ client.on_message(async (payload) => {
         const msgToSend = msgText
             ? `<b>${chatName}</b>\n<b>${senderName}</b>\n${msgText}`
             : `<b><b>${chatName}</b>\n${senderName}</b>`;
+        const targetTelegramChatId = chatId === OFP_CHAT_ID ? TG_CHAT_ID_OFP : TG_CHAT_ID;
 
-        await sendToTelegram(TG_BOT_TOKEN, TG_CHAT_ID, msgToSend, msgAttaches);
+        await sendToTelegram(TG_BOT_TOKEN, targetTelegramChatId, msgToSend, msgAttaches);
     }
 });
 
