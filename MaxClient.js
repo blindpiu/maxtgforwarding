@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require("uuid");
 class MaxClient {
     constructor(token) {
         this.token = token;
+        this.proxyUrl = process.env.MAX_PROXY_URL;
         this.seq = 1;
         this.ws = null;
 
@@ -85,14 +86,26 @@ class MaxClient {
     // CONNECT
     // =========================
 
-    connect() {
-        this.ws = new WebSocket("wss://ws-api.oneme.ru/websocket", {
+    async connect() {
+        const options = {
             headers: {
                 Origin: "https://web.oneme.ru",
                 "User-Agent":
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             }
-        });
+        };
+
+        if (this.proxyUrl) {
+            if (!this.proxyUrl.startsWith("socks://") && !this.proxyUrl.startsWith("socks5://")) {
+                throw new Error("MAX_PROXY_URL must use socks:// or socks5://");
+            }
+
+            const { SocksProxyAgent } = await import("socks-proxy-agent");
+            options.agent = new SocksProxyAgent(this.proxyUrl);
+            console.log("Connecting to MAX through SOCKS proxy");
+        }
+
+        this.ws = new WebSocket("wss://ws-api.oneme.ru/websocket", options);
 
         this.ws.on("open", () => {
             console.log("✅ Connected to Max");

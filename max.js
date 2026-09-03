@@ -67,4 +67,7 @@ client.on_message(async (payload) => {
     }
 });
 
-client.connect();
+client.connect().catch((err) => {
+    console.error("Unable to connect to MAX:", err);
+    process.exit(1);
+});
