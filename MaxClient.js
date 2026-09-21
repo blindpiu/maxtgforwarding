@@ -237,7 +237,7 @@ class MaxClient {
         if (msg.opcode === 128) {
             for (const handler of this.messageHandlers) {
                 try {
-                    handler(msg.payload);
+                    await handler(msg.payload);
                 } catch (e) {
                     console.error("Handler error:", e);
                 }
@@ -290,6 +290,76 @@ class MaxClient {
                 : payload.contact;
 
             return contact;
+        });
+    }
+
+    async requestFileDownloadUrl({ chatId, messageId, fileId, fileName = "", attachLocalId = "" }) {
+        if (chatId == null || messageId == null || fileId == null) {
+            throw new Error("requestFileDownloadUrl requires chatId, messageId and fileId");
+        }
+
+        return new Promise((resolve, reject) => {
+            const seq = this._nextSeq();
+            // Остаётся в пределах Number.MAX_SAFE_INTEGER и сериализуется как JSON number.
+            const requestId = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+            const payload = {
+                requestId,
+                fileId: Number(fileId),
+                fileName: String(fileName || ""),
+                messageId: String(messageId),
+                chatId: Number(chatId)
+            };
+
+            if (!Number.isSafeInteger(payload.fileId) || !Number.isSafeInteger(payload.chatId)) {
+                reject(new Error("fileId and chatId must be safe integers"));
+                return;
+            }
+
+            if (attachLocalId) payload.attachLocalId = String(attachLocalId);
+
+            const timeout = setTimeout(() => {
+                if (this.pending.has(seq)) {
+                    this.pending.delete(seq);
+                    reject(new Error("requestFileDownloadUrl timeout"));
+                }
+            }, 10000);
+
+            this.pending.set(seq, {
+                resolve: (response) => {
+                    clearTimeout(timeout);
+                    resolve(response);
+                },
+                reject: (error) => {
+                    clearTimeout(timeout);
+                    reject(error);
+                }
+            });
+
+            try {
+                this.ws.send(JSON.stringify({
+                    ver: 11,
+                    cmd: 0,
+                    seq,
+                    opcode: 88,
+                    payload
+                }));
+            } catch (error) {
+                clearTimeout(timeout);
+                this.pending.delete(seq);
+                reject(error);
+            }
+        }).then((response) => {
+            const payload = response.payload || {};
+            if (payload.error) {
+                const message = payload.localizedMessage
+                    || payload.message
+                    || (typeof payload.error === "string" ? payload.error : JSON.stringify(payload.error));
+                throw new Error(message || "Unable to get file download URL");
+            }
+
+            const url = payload.url || payload.c;
+            if (!url) throw new Error("MAX response does not contain a file URL");
+            return url;
         });
     }
 

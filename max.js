@@ -16,6 +16,29 @@ const ENG_CHAT_ID = parseInt(process.env.ENG_CHAT_ID, 10);
 
 const client = new MaxClient(MAX_TOKEN);
 
+async function resolveFileUrls(attachments, chatId, messageId) {
+    return Promise.all(attachments.map(async (attach) => {
+        const type = String(attach?._type || attach?.type || "").toUpperCase();
+        const hasUrl = attach?.baseUrl || attach?.url || attach?.payload?.url || attach?.payload?.link;
+
+        if (type !== "FILE" || hasUrl || attach?.fileId == null) return attach;
+
+        try {
+            const url = await client.requestFileDownloadUrl({
+                chatId,
+                messageId,
+                fileId: attach.fileId,
+                fileName: attach.name || attach.fileName,
+                attachLocalId: attach.attachLocalId
+            });
+            return { ...attach, url };
+        } catch (err) {
+            console.error(`Unable to get URL for file ${attach.name || attach.fileId}:`, err.message);
+            return attach;
+        }
+    }));
+}
+
 client.on_connect(() => {
     const now = new Date();
     console.log(`[${now.toLocaleString()}] Bot is ready`);
@@ -29,6 +52,7 @@ client.on_message(async (payload) => {
 
     let msgText = message.text || "";
     let msgAttaches = message.attaches || [];
+    let attachmentMessageId = message.id;
 
     const chatName = CHAT_NAMES[String(chatId)] || String(chatId);
     let senderName = "Unknown";
@@ -49,6 +73,7 @@ client.on_message(async (payload) => {
             const fwdMsg = link.message;
             msgText = fwdMsg.text || "";
             msgAttaches = fwdMsg.attaches || [];
+            attachmentMessageId = fwdMsg.id || message.id;
             try {
                 const fwdAuthor = await client.getUser({ id: fwdMsg.sender });
                 const fwdName = fwdAuthor?.names?.[0]?.name || "Unknown";
@@ -60,6 +85,8 @@ client.on_message(async (payload) => {
     }
 
     if (msgText || msgAttaches.length > 0) {
+        msgAttaches = await resolveFileUrls(msgAttaches, chatId, attachmentMessageId);
+
         const msgToSend = msgText
             ? `<b>${chatName}</b>\n<b>${senderName}</b>\n${msgText}`
             : `<b><b>${chatName}</b>\n${senderName}</b>`;
