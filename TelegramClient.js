@@ -1,23 +1,46 @@
 const axios = require("axios");
 
+function getAttachType(attach) {
+    return String(attach?._type || attach?.type || "UNKNOWN").toUpperCase();
+}
+
 function handleAttach(attach) {
-    switch (attach._type) {
-        case "FILE":
-            return attach.name;
-        case "SHARE":
-            return attach.title || attach.url || "SHARE";
-        default:
-            return attach._type;
+    const type = getAttachType(attach);
+
+    if (type === "FILE") {
+        return attach.name || attach.fileName || attach.payload?.filename || "FILE";
     }
+
+    if (type === "AUDIO" || type === "VOICE") {
+        return attach.title || attach.name || attach.payload?.filename || type;
+    }
+
+    if (type === "SHARE") {
+        return attach.title || attach.url || "SHARE";
+    }
+
+    return type;
 }
 
 function getAttachUrl(attach) {
-    if (attach._type === "PHOTO") return attach.baseUrl || attach.url;
-    if (attach._type === "FILE") return attach.baseUrl || attach.url;
-    if (attach._type === "SHARE" && attach.image && attach.image._type === "PHOTO") {
-        return attach.image.url;
+    return attach?.baseUrl
+        || attach?.url
+        || attach?.payload?.url
+        || attach?.payload?.link
+        || null;
+}
+
+async function postToTelegram(TG_BOT_TOKEN, method, payload) {
+    const apiUrl = `https://api.telegram.org/bot${TG_BOT_TOKEN}/${method}`;
+
+    try {
+        const resp = await axios.post(apiUrl, payload);
+        console.log(`Sent via ${method}:`, resp.data);
+        return true;
+    } catch (e) {
+        console.error(`Error in ${method}:`, e.response?.data || e.message);
+        return false;
     }
-    return null;
 }
 
 /**
@@ -29,73 +52,97 @@ function getAttachUrl(attach) {
  */
 async function sendToTelegram(TG_BOT_TOKEN = "", TG_CHAT_ID = 0, caption = "", attachments = []) {
     const photos = [];
-    const docs = [];
+    const files = [];
+    const skipped = [];
 
     for (const attach of attachments) {
-        const url = getAttachUrl(attach);
+        const type = getAttachType(attach);
+        let url = getAttachUrl(attach);
+
+        if (type === "SHARE" && attach.image) {
+            url = getAttachUrl(attach.image);
+        }
+
         if (!url) {
-            // необработанные файлы можно добавить в caption
+            skipped.push(attach);
             continue;
         }
 
-        if ((attach._type === "PHOTO") || (attach._type === "SHARE" && attach.image)) {
-            photos.push({ ...attach, baseUrl: url });
-        } else if (attach._type === "FILE") {
-            docs.push({ ...attach, baseUrl: url });
+        if (type === "PHOTO" || type === "IMAGE" || (type === "SHARE" && attach.image)) {
+            photos.push({ ...attach, telegramUrl: url });
+        } else if (["FILE", "AUDIO", "VOICE"].includes(type)) {
+            files.push({ ...attach, telegramType: type, telegramUrl: url });
+        } else {
+            skipped.push(attach);
         }
     }
 
-    // 1️⃣ Отправка фото (альбомы по 10)
+    let messageCaption = caption;
+    if (skipped.length) {
+        const skippedText = `Необработанные вложения: ${skipped.map(handleAttach).join(", ")}`;
+        messageCaption = messageCaption ? `${messageCaption}\n\n${skippedText}` : skippedText;
+    }
+
+    let captionSent = false;
+
+    // Фото отправляются альбомами не более чем по 10 элементов.
     for (let i = 0; i < photos.length; i += 10) {
         const chunk = photos.slice(i, i + 10);
-        const media = chunk.map((p, idx) => {
-            const item = { type: "photo", media: p.baseUrl };
-            if (idx === 0 && caption) {
-                item.caption = caption;
+        const media = chunk.map((photo, idx) => {
+            const item = { type: "photo", media: photo.telegramUrl };
+            if (!captionSent && idx === 0 && messageCaption) {
+                item.caption = messageCaption;
                 item.parse_mode = "HTML";
             }
             return item;
         });
 
-        try {
-            const apiUrl = `https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMediaGroup`;
-            const resp = await axios.post(apiUrl, { chat_id: TG_CHAT_ID, media: JSON.stringify(media) });
-            console.log("Sent photo album:", resp.data);
-        } catch (e) {
-            console.error("Error sending photo album:", e.response?.data || e.message);
-        }
+        const sent = await postToTelegram(TG_BOT_TOKEN, "sendMediaGroup", {
+            chat_id: TG_CHAT_ID,
+            media: JSON.stringify(media)
+        });
+        if (sent && messageCaption) captionSent = true;
     }
 
-    // 2️⃣ Отправка документов
-    for (const doc of docs) {
-        try {
-            const apiUrl = `https://api.telegram.org/bot${TG_BOT_TOKEN}/sendDocument`;
-            const payload = {
-                chat_id: TG_CHAT_ID,
-                caption: caption || handleAttach(doc),
-                parse_mode: "HTML",
-                document: doc.baseUrl
-            };
-            const resp = await axios.post(apiUrl, payload);
-            console.log("Sent document:", resp.data);
-        } catch (e) {
-            console.error("Error sending document:", e.response?.data || e.message);
-        }
-    }
+    for (const file of files) {
+        const fileCaption = !captionSent ? (messageCaption || handleAttach(file)) : "";
+        const commonPayload = {
+            chat_id: TG_CHAT_ID,
+            caption: fileCaption,
+            parse_mode: "HTML"
+        };
 
-    // 3️⃣ Если нет вложений, но есть только текст
-    if (!attachments.length && caption) {
-        try {
-            const apiUrl = `https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`;
-            const resp = await axios.post(apiUrl, {
-                chat_id: TG_CHAT_ID,
-                text: caption,
-                parse_mode: "HTML"
+        let sent = false;
+        if (file.telegramType === "AUDIO") {
+            sent = await postToTelegram(TG_BOT_TOKEN, "sendAudio", {
+                ...commonPayload,
+                audio: file.telegramUrl
             });
-            console.log("Sent text:", resp.data);
-        } catch (e) {
-            console.error("Error sending text:", e.response?.data || e.message);
+        } else if (file.telegramType === "VOICE") {
+            sent = await postToTelegram(TG_BOT_TOKEN, "sendVoice", {
+                ...commonPayload,
+                voice: file.telegramUrl
+            });
         }
+
+        // Если Telegram не принял формат аудио, пересылаем его как обычный файл.
+        if (!sent) {
+            sent = await postToTelegram(TG_BOT_TOKEN, "sendDocument", {
+                ...commonPayload,
+                document: file.telegramUrl
+            });
+        }
+
+        if (sent && fileCaption) captionSent = true;
+    }
+
+    // Даже неизвестное вложение не должно приводить к потере текста сообщения.
+    if (!captionSent && messageCaption) {
+        await postToTelegram(TG_BOT_TOKEN, "sendMessage", {
+            chat_id: TG_CHAT_ID,
+            text: messageCaption,
+            parse_mode: "HTML"
+        });
     }
 }
 

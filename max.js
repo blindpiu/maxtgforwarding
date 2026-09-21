@@ -9,8 +9,10 @@ const MAX_CHAT_IDS = (process.env.MAX_CHAT_IDS || "").split(",").map(x => parseI
 const TG_BOT_TOKEN = process.env.TG_BOT_TOKEN;
 const TG_CHAT_ID = process.env.TG_CHAT_ID;
 const TG_CHAT_ID_OFP = process.env.TG_CHAT_ID_OFP;
+const TG_CHAT_ID_ENG = process.env.TG_CHAT_ID_ENG;
 const CHAT_NAMES = process.env.CHAT_NAMES ? JSON.parse(process.env.CHAT_NAMES) : {};
 const OFP_CHAT_ID = parseInt(process.env.OFP_CHAT_ID, 10);
+const ENG_CHAT_ID = parseInt(process.env.ENG_CHAT_ID, 10);
 
 const client = new MaxClient(MAX_TOKEN);
 
@@ -61,7 +63,12 @@ client.on_message(async (payload) => {
         const msgToSend = msgText
             ? `<b>${chatName}</b>\n<b>${senderName}</b>\n${msgText}`
             : `<b><b>${chatName}</b>\n${senderName}</b>`;
-        const targetTelegramChatId = chatId === OFP_CHAT_ID ? TG_CHAT_ID_OFP : TG_CHAT_ID;
+        let targetTelegramChatId = TG_CHAT_ID;
+        if (chatId === OFP_CHAT_ID) {
+            targetTelegramChatId = TG_CHAT_ID_OFP;
+        } else if (chatId === ENG_CHAT_ID) {
+            targetTelegramChatId = TG_CHAT_ID_ENG;
+        }
 
         await sendToTelegram(TG_BOT_TOKEN, targetTelegramChatId, msgToSend, msgAttaches);
     }
