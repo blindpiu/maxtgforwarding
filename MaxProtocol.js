@@ -6,7 +6,17 @@ const HEADER_LENGTH = 10;
 const MAX_BODY_LENGTH = 0xffffff;
 const MAX_DECODED_LENGTH = 64 * 1024 * 1024;
 const extensionCodec = new ExtensionCodec();
-const msgpackOptions = { extensionCodec, useBigInt64: true };
+const msgpackOptions = {
+    extensionCodec,
+    useBigInt64: true,
+    mapKeyConverter: (key) => {
+        // MAX maps can use int64 IDs as keys. Object keys must be strings;
+        // converting directly avoids rounding IDs through Number.
+        if (typeof key === "bigint") return key.toString();
+        if (typeof key === "string" || typeof key === "number") return key;
+        throw new Error(`Unsupported MAX map key type: ${typeof key}`);
+    }
+};
 
 // MAX's extension type 1 contains another MessagePack value.
 extensionCodec.register({
