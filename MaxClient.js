@@ -83,7 +83,11 @@ class MaxClient {
         if (response.cmd === 3 || payload.error) {
             const message = payload.localizedMessage || payload.message
                 || (typeof payload.error === "string" ? payload.error : "MAX request failed");
-            throw new Error(message);
+            const code = typeof payload.error === "string" ? payload.error : undefined;
+            const error = new Error(`MAX opcode ${response.opcode}: ${message}${code && code !== message ? ` (${code})` : ""}`);
+            error.opcode = response.opcode;
+            error.code = code;
+            throw error;
         }
         return payload;
     }

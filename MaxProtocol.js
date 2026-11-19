@@ -30,6 +30,21 @@ function normalizeIntegers(value) {
     return value;
 }
 
+function prepareIntegers(value) {
+    // With useBigInt64 enabled, @msgpack/msgpack encodes Number integers
+    // outside the 32-bit range as float64. MAX expects integer wire types
+    // for timestamps, session IDs and request IDs, just like Python msgpack.
+    if (typeof value === "number" && Number.isSafeInteger(value)
+        && (value > 0xffffffff || value < -0x80000000)) {
+        return BigInt(value);
+    }
+    if (Array.isArray(value)) return value.map(prepareIntegers);
+    if (value && Object.prototype.toString.call(value) === "[object Object]") {
+        return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, prepareIntegers(item)]));
+    }
+    return value;
+}
+
 // Check raw LZ4 bounds before calling lz4js, whose block decoder assumes valid input.
 // The header's compression byte is a size hint, not an exact decoded length.
 function decodedBlockLength(body) {
@@ -66,7 +81,7 @@ function decodedBlockLength(body) {
 }
 
 function encodePacket({ cmd = 0, seq, opcode, payload }) {
-    let body = payload == null ? Buffer.alloc(0) : Buffer.from(encode(payload, msgpackOptions));
+    let body = payload == null ? Buffer.alloc(0) : Buffer.from(encode(prepareIntegers(payload), msgpackOptions));
     if (body.length > MAX_DECODED_LENGTH) throw new Error("MAX payload too large");
     let compression = 0;
     if (body.length > 32) {
